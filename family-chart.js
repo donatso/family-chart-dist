@@ -1240,3 +1240,5 @@ var index = {
 return index;
 
 })));
+
+window.denis = "tenis"
