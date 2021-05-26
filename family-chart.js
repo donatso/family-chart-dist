@@ -100,276 +100,6 @@ function toggleAllRels(tree_data, hide_rels) {
   tree_data.forEach(d => {d.data.hide_rels = hide_rels; toggleRels(d, hide_rels);});
 }
 
-function CalculateTree({datum, data_stash, card_dim}) {
-  const sx = card_dim.w+40, y = card_dim.h+50;
-  datum = datum ? datum : {id: "0", data: {fn: "FN", ln: "LN", gender: "M"}};
-  const data = [
-    {x: 0, y: 0, data: datum},
-    {x: -100, y: -y, data: {rel_type: 'father', data: {fn: 'Add', ln: "father", gender: "M"}}},
-    {x: 100, y: -y, data: {rel_type: 'mother', data: {fn: 'Add', ln: "mother", gender: "F"}}},
-
-    {x: sx, y: 0, data: {rel_type: 'spouse', data: {fn: 'Add', ln: "spouse", gender: "F"}}},
-
-    {x: -100, y: y, data: {rel_type: 'son', data: {fn: 'Add', ln: "son", gender: "M"}}},
-    {x: 100, y: y, data: {rel_type: 'daughter', data: {fn: 'Add', ln: "daughter", gender: "F"}}},
-  ].filter(d => shouldAddRel(d.data.rel_type));
-
-  function shouldAddRel(rel_type) {
-    if (rel_type === 'father') return !datum.rels.father || data_stash.find(d => d.id === datum.rels.father).to_add
-    else if (rel_type === 'mother') return !datum.rels.mother || data_stash.find(d => d.id === datum.rels.mother).to_add
-    else return true
-  }
-
-  return {data}
-}
-
-function NewRelative({datum, data_stash, rel_type}) {
-  const new_rel = createNewRel(rel_type);
-  return {new_rel, addNewRel}
-
-  function createNewRel(rel_type) {
-    const new_rel_gender = (["daughter", "mother"].includes(rel_type) || rel_type === "spouse" && datum.data.gender === "M") ? "F" : "M";
-    return {id: generateUUID(), data: {gender: new_rel_gender}, rels: {}}
-  }
-
-  function addNewRel() {
-    if (rel_type === "daughter") addChild(new_rel);
-    else if (rel_type === "son") addChild(new_rel);
-    else if (rel_type === "father") addParent(new_rel);
-    else if (rel_type === "mother") addParent(new_rel);
-    else if (rel_type === "spouse") addSpouse(new_rel);
-  }
-
-  function addChild(new_rel) {
-    if (new_rel.data.other_parent) {
-      addChildToSpouseAndParentToChild(new_rel.data.other_parent);
-      delete new_rel.data.other_parent;
-    }
-    new_rel.rels[datum.data.gender === 'M' ? 'father' : 'mother'] = datum.id;
-    if (!datum.rels.children) datum.rels.children = [];
-    datum.rels.children.push(new_rel.id);
-    data_stash.push(new_rel);
-    return new_rel
-
-    function addChildToSpouseAndParentToChild(spouse_id) {
-      if (spouse_id === "_new") spouse_id = addOtherParent().id;
-
-      const spouse = data_stash.find(d => d.id === spouse_id);
-      new_rel.rels[spouse.data.gender === 'M' ? 'father' : 'mother'] = spouse.id;
-      if (!spouse.rels.hasOwnProperty('children')) spouse.rels.children = [];
-      spouse.rels.children.push(new_rel.id);
-
-      function addOtherParent() {
-        const new_spouse = createNewRel("spouse");
-        addSpouse(new_spouse);
-        return new_spouse
-      }
-    }
-  }
-
-  function addParent(new_rel) {
-    const is_father = new_rel.data.gender === "M",
-      parent_to_add_id = datum.rels[is_father ? 'father' : 'mother'];
-    if (parent_to_add_id) removeToAdd(data_stash.find(d => d.id === parent_to_add_id), data_stash);
-    addNewParent();
-
-    function addNewParent() {
-      datum.rels[is_father ? 'father' : 'mother'] = new_rel.id;
-      data_stash.push(new_rel);
-      handleSpouse();
-      new_rel.rels.children = [datum.id];
-      return new_rel
-
-      function handleSpouse() {
-        const spouse_id = datum.rels[!is_father ? 'father' : 'mother'];
-        if (!spouse_id) return
-        const spouse = data_stash.find(d => d.id === spouse_id);
-        new_rel.rels.spouses = [spouse_id];
-        if (!spouse.rels.spouses) spouse.rels.spouses = [];
-        spouse.rels.spouses.push(new_rel.id);
-        return spouse
-      }
-    }
-  }
-
-  function addSpouse(new_rel) {
-    removeIfToAdd();
-    if (!datum.rels.spouses) datum.rels.spouses = [];
-    datum.rels.spouses.push(new_rel.id);
-    new_rel.rels.spouses = [datum.id];
-    data_stash.push(new_rel);
-
-    function removeIfToAdd() {
-      if (!datum.rels.spouses) return
-      datum.rels.spouses.forEach(spouse_id => {
-        const spouse = data_stash.find(d => d.id === spouse_id);
-        if (spouse.to_add) removeToAdd(spouse, data_stash);
-      });
-    }
-  }
-
-}
-
-function View(store, tree, datum) {
-  const data_stash = store.getData(),
-    svg_dim = store.state.cont.getBoundingClientRect(),
-    tree_fit = calculateTreeFit(svg_dim),
-    mounted = (node) => {
-      addEventListeners(node);
-    };
-
-  return {
-    template: (`
-      <svg id="family-tree-svg" style="width: 100%; height: 100%">
-        <rect width="${svg_dim.width}" height="${svg_dim.height}" fill="transparent" />
-        <g class="view">
-          <g transform="translate(${tree_fit.x}, ${tree_fit.y})scale(${tree_fit.k})">
-            ${tree.data.slice(1).map((d, i) => Link({d, is_vertical: !["spouse"].includes(d.data.rel_type)}).template)}
-            ${tree.data.slice(1).map((d, i) => Card({d}).template)}
-          </g>
-        </g>
-      </svg>
-    `),
-    mounted
-  }
-
-  function calculateTreeFit(svg_dim) {
-    return {k:1, x:svg_dim.width/2, y: svg_dim.height/2}
-  }
-
-  function Card({d, is_main}) {
-    const [w, h] = is_main ? [160, 60] : [160, 40],
-      pos = {x: d.x, y: d.y};
-
-    return {template: (`
-      <g transform="translate(${pos.x}, ${pos.y})" class="card" data-rel_type="${d.data.rel_type}" style="cursor: pointer">
-        <g transform="translate(${-w / 2}, ${-h / 2})">
-          ${CardBody({d,w,h}).template}
-        </g>
-      </g>
-    `)
-    }
-
-    function CardBody({d,w,h}) {
-      const color_class = d.data.data.gender === 'M' ? 'card-male' : d.data.data.gender === 'F' ? 'card-female' : 'card-genderless';
-      return {template: (`
-        <g>
-          <rect width="${w}" height="${h}" fill="#fff" rx="${10}" ${d.data.main ? 'stroke="#000"' : ''} class="${color_class}" />
-          <text transform="translate(${0}, ${h / 4})">
-            <tspan x="${10}" dy="${14}">${d.data.data.fn} ${d.data.data.ln || ''}</tspan>
-            <tspan x="${10}" dy="${14}">${d.data.data.bd || ''}</tspan>
-          </text>
-        </g>
-      `)
-      }
-    }
-  }
-
-  function Link({d, is_vertical}) {
-    return {template: (`
-      <path d="${createPath()}" fill="none" stroke="#fff" />
-    `)}
-
-    function createPath() {
-      const {w,h} = store.state.card_dim;
-      let parent = (is_vertical && d.y < 0)
-        ? {x: 0, y: -h/2}
-        : (is_vertical && d.y > 0)
-        ? {x: 0, y: h/2}
-        : (!is_vertical && d.x < 0)
-        ? {x: -w/2, y: 0}
-        : (!is_vertical && d.x > 0)
-        ? {x: w/2, y: 0}
-        : {x: 0, y: 0};
-
-
-      if (is_vertical) {
-        return (
-          "M" + d.x + "," + d.y
-          + "C" + (d.x) + "," + (d.y + (d.y < 0 ? 50 : -50))
-          + " " + (parent.x) + "," + (parent.y + (d.y < 0 ? -50 : 50))
-          + " " + parent.x + "," + parent.y
-        )
-      } else {
-        const s = d.x > 0 ? +1 : -1;
-        return (
-          "M" + d.x + "," + d.y
-          + "C" + (parent.x + 50*s) + "," + d.y
-          + " " + (parent.x + 150*s) + "," + parent.y
-          + " " + parent.x + "," + parent.y
-        )
-      }
-    }
-  }
-
-  function addEventListeners(view) {
-    view.addEventListener("click", e => {
-      const node = e.target;
-      handleCardClick(node) || view.remove();
-    });
-
-    function handleCardClick(node) {
-      if (!node.closest('.card')) return
-      const card = node.closest('.card'),
-        rel_type = card.getAttribute("data-rel_type"),
-        {new_rel, addNewRel} = NewRelative({datum, data_stash, rel_type}),
-        postSubmit = () => {
-          view.remove();
-          addNewRel();
-          store.update.tree();
-        };
-      store.state.cardEditForm({datum: new_rel, rel_datum: datum, rel_type, postSubmit, store});
-      return true
-    }
-  }
-
-}
-
-function AddRelativeTree(store, d_id, transition_time) {
-  const datum = store.getData().find(d => d.id === d_id),
-    tree = CalculateTree({datum, data_stash: store.getData(), card_dim: store.state.card_dim}),
-    view = View(store, tree, datum);
-
-  const div_add_relative = document.createElement("div");
-  div_add_relative.style.cssText = "width: 100%; height: 100%; position: absolute; top: 0; left: 0;background-color: rgba(0,0,0,.3);opacity: 0";
-  div_add_relative.innerHTML = view.template;
-
-  store.state.cont.appendChild(div_add_relative);
-  view.mounted(div_add_relative);
-  d3.select(div_add_relative).transition().duration(transition_time).delay(transition_time/4).style("opacity", 1);
-}
-
-function moveToAddToAdded(datum, data_stash) {
-  delete datum.to_add;
-  return datum
-}
-
-function removeToAdd(datum, data_stash) {
-  deletePerson(datum, data_stash);
-  return false
-}
-
-function deletePerson(datum, data_stash) {
-  if (!checkIfRelativesConnectedWithoutPerson(datum, data_stash)) return {success: false, error: 'checkIfRelativesConnectedWithoutPerson'}
-  executeDelete();
-  return {success: true};
-
-  function executeDelete() {
-    data_stash.forEach(d => {
-      for (let k in d.rels) {
-        if (!d.rels.hasOwnProperty(k)) continue
-        if (d.rels[k] === datum.id) {
-          delete d.rels[k];
-        } else if (Array.isArray(d.rels[k]) && d.rels[k].includes(datum.id)) {
-          d.rels[k].splice(d.rels[k].findIndex(did => did === datum.id, 1));
-        }
-      }
-    });
-    data_stash.splice(data_stash.findIndex(d => d.id === datum.id), 1);
-    data_stash.forEach(d => {if (d.to_add) deletePerson(d, data_stash);});  // full update of tree
-  }
-}
-
 function checkIfRelativesConnectedWithoutPerson(datum, data_stash) {
   const r = datum.rels,
     r_ids = [r.father, r.mother, ...(r.spouses || []), ...(r.children || [])].filter(r_id => !!r_id),
@@ -413,39 +143,35 @@ function checkIfRelativesConnectedWithoutPerson(datum, data_stash) {
   function isM(d0) {return typeof d0 === 'object' ? d0.id === data_stash[0].id : d0 === data_stash[0].id}  // todo: make main more exact
 }
 
-function cardChangeMain(store, {card, d}) {
-  toggleAllRels(store.getTree().data, false);
-  store.update.mainId(d.data.id);
-  store.update.tree({tree_position: 'inherit'});
-  return true
+function moveToAddToAdded(datum, data_stash) {
+  delete datum.to_add;
+  return datum
 }
 
-function cardEdit(store, {card, d}) {
-  const datum = d.data,
-    postSubmit = (props) => {
-      if (datum.to_add) moveToAddToAdded(datum, store.getData());
-      if (props && props.delete) {
-        if (datum.main) store.update.mainId(null);
-        deletePerson(datum, store.getData());
+function removeToAdd(datum, data_stash) {
+  deletePerson(datum, data_stash);
+  return false
+}
+
+function deletePerson(datum, data_stash) {
+  if (!checkIfRelativesConnectedWithoutPerson(datum, data_stash)) return {success: false, error: 'checkIfRelativesConnectedWithoutPerson'}
+  executeDelete();
+  return {success: true};
+
+  function executeDelete() {
+    data_stash.forEach(d => {
+      for (let k in d.rels) {
+        if (!d.rels.hasOwnProperty(k)) continue
+        if (d.rels[k] === datum.id) {
+          delete d.rels[k];
+        } else if (Array.isArray(d.rels[k]) && d.rels[k].includes(datum.id)) {
+          d.rels[k].splice(d.rels[k].findIndex(did => did === datum.id), 1);
+        }
       }
-      store.update.tree();
-    };
-  store.state.cardEditForm({datum, postSubmit, store});
-}
-
-function cardAddRelative(store, {card, d}) {
-  const transition_time = 1000;
-
-  toggleAllRels(store.getTree().data, false);
-  store.update.mainId(d.data.id);
-  store.update.tree({tree_position: 'main_to_middle', transition_time});
-  AddRelativeTree(store, d.data.id, transition_time);
-}
-
-function cardShowHideRels(store, {card, d}) {
-  d.data.hide_rels = !d.data.hide_rels;
-  toggleRels(d, d.data.hide_rels);
-  store.update.tree({tree_position: 'inherit'});
+    });
+    data_stash.splice(data_stash.findIndex(d => d.id === datum.id), 1);
+    data_stash.forEach(d => {if (d.to_add) deletePerson(d, data_stash);});  // full update of tree
+  }
 }
 
 function manualZoom({amount, svg, transition_time=500}) {
@@ -476,22 +202,7 @@ function generateUUID() {
   });
 }
 
-var handlers = /*#__PURE__*/Object.freeze({
-__proto__: null,
-moveToAddToAdded: moveToAddToAdded,
-removeToAdd: removeToAdd,
-deletePerson: deletePerson,
-checkIfRelativesConnectedWithoutPerson: checkIfRelativesConnectedWithoutPerson,
-cardChangeMain: cardChangeMain,
-cardEdit: cardEdit,
-cardAddRelative: cardAddRelative,
-cardShowHideRels: cardShowHideRels,
-manualZoom: manualZoom,
-isAllRelativeDisplayed: isAllRelativeDisplayed,
-generateUUID: generateUUID
-});
-
-function CalculateTree$1({data_stash, main_id=null, is_vertical=true, node_separation=250, level_separation=150}) {
+function CalculateTree({data_stash, main_id=null, is_vertical=true, node_separation=250, level_separation=150}) {
   data_stash = createRelsToAdd(data_stash);
   sortChildrenWithSpouses(data_stash);
   const main = main_id !== null ? data_stash.find(d => d.id === main_id) : data_stash[0],
@@ -1017,6 +728,299 @@ function ViewAddEventListeners(store) {
 
 }
 
+function CalculateTree$1({datum, data_stash, card_dim}) {
+  const sx = card_dim.w+40, y = card_dim.h+50;
+  datum = datum ? datum : {id: "0", data: {fn: "FN", ln: "LN", gender: "M"}};
+  const data = [
+    {x: 0, y: 0, data: datum},
+    {x: -100, y: -y, data: {rel_type: 'father', data: {fn: 'Add', ln: "father", gender: "M"}}},
+    {x: 100, y: -y, data: {rel_type: 'mother', data: {fn: 'Add', ln: "mother", gender: "F"}}},
+
+    {x: sx, y: 0, data: {rel_type: 'spouse', data: {fn: 'Add', ln: "spouse", gender: "F"}}},
+
+    {x: -100, y: y, data: {rel_type: 'son', data: {fn: 'Add', ln: "son", gender: "M"}}},
+    {x: 100, y: y, data: {rel_type: 'daughter', data: {fn: 'Add', ln: "daughter", gender: "F"}}},
+  ].filter(d => shouldAddRel(d.data.rel_type));
+
+  function shouldAddRel(rel_type) {
+    if (rel_type === 'father') return !datum.rels.father || data_stash.find(d => d.id === datum.rels.father).to_add
+    else if (rel_type === 'mother') return !datum.rels.mother || data_stash.find(d => d.id === datum.rels.mother).to_add
+    else return true
+  }
+
+  return {data}
+}
+
+function handleRelsOfNewDatum({datum, data_stash, rel_type, rel_datum}) {
+  if (rel_type === "daughter" || rel_type === "son") addChild(datum);
+  else if (rel_type === "father" || rel_type === "mother") addParent(datum);
+  else if (rel_type === "spouse") addSpouse(datum);
+
+  function addChild(datum) {
+    if (datum.data.other_parent) {
+      addChildToSpouseAndParentToChild(datum.data.other_parent);
+      delete datum.data.other_parent;
+    }
+    datum.rels[rel_datum.data.gender === 'M' ? 'father' : 'mother'] = rel_datum.id;
+    if (!rel_datum.rels.children) rel_datum.rels.children = [];
+    rel_datum.rels.children.push(datum.id);
+    return datum
+
+    function addChildToSpouseAndParentToChild(spouse_id) {
+      if (spouse_id === "_new") spouse_id = addOtherParent().id;
+
+      const spouse = data_stash.find(d => d.id === spouse_id);
+      datum.rels[spouse.data.gender === 'M' ? 'father' : 'mother'] = spouse.id;
+      if (!spouse.rels.hasOwnProperty('children')) spouse.rels.children = [];
+      spouse.rels.children.push(datum.id);
+
+      function addOtherParent() {
+        const new_spouse = createNewRel("spouse");
+        addSpouse(new_spouse);
+        return new_spouse
+      }
+    }
+  }
+
+  function addParent(datum) {
+    const is_father = datum.data.gender === "M",
+      parent_to_add_id = rel_datum.rels[is_father ? 'father' : 'mother'];
+    if (parent_to_add_id) removeToAdd(data_stash.find(d => d.id === parent_to_add_id), data_stash);
+    addNewParent();
+
+    function addNewParent() {
+      rel_datum.rels[is_father ? 'father' : 'mother'] = datum.id;
+      handleSpouse();
+      datum.rels.children = [rel_datum.id];
+      return datum
+
+      function handleSpouse() {
+        const spouse_id = rel_datum.rels[!is_father ? 'father' : 'mother'];
+        if (!spouse_id) return
+        const spouse = data_stash.find(d => d.id === spouse_id);
+        datum.rels.spouses = [spouse_id];
+        if (!spouse.rels.spouses) spouse.rels.spouses = [];
+        spouse.rels.spouses.push(datum.id);
+        return spouse
+      }
+    }
+  }
+
+  function addSpouse(datum) {
+    removeIfToAdd();
+    if (!rel_datum.rels.spouses) rel_datum.rels.spouses = [];
+    rel_datum.rels.spouses.push(datum.id);
+    datum.rels.spouses = [rel_datum.id];
+
+    function removeIfToAdd() {
+      if (!rel_datum.rels.spouses) return
+      rel_datum.rels.spouses.forEach(spouse_id => {
+        const spouse = data_stash.find(d => d.id === spouse_id);
+        if (spouse.to_add) removeToAdd(spouse, data_stash);
+      });
+    }
+  }
+}
+
+function NewRelative({data_stash, rel_type, rel_datum}) {
+  const datum = createNewRel(rel_datum, rel_type);
+  return {new_rel: datum, addNewRel}
+
+  function createNewRel(rel_datum, rel_type) {
+    return {id: generateUUID(), data: {gender: getGender(rel_datum, rel_type)}, rels: {}}
+  }
+
+  function addNewRel() {
+    data_stash.push(datum);
+    return handleRelsOfNewDatum({datum, data_stash, rel_type, rel_datum})
+  }
+
+  function getGender(rel_datum, rel_type) {
+    return (["daughter", "mother"].includes(rel_type) || rel_type === "spouse" && rel_datum.data.gender === "M") ? "F" : "M"
+  }
+}
+
+function View(store, tree, datum) {
+  const data_stash = store.getData(),
+    svg_dim = store.state.cont.getBoundingClientRect(),
+    tree_fit = calculateTreeFit(svg_dim),
+    mounted = (node) => {
+      addEventListeners(node);
+    };
+
+  return {
+    template: (`
+      <svg id="family-tree-svg" style="width: 100%; height: 100%">
+        <rect width="${svg_dim.width}" height="${svg_dim.height}" fill="transparent" />
+        <g class="view">
+          <g transform="translate(${tree_fit.x}, ${tree_fit.y})scale(${tree_fit.k})">
+            ${tree.data.slice(1).map((d, i) => Link({d, is_vertical: !["spouse"].includes(d.data.rel_type)}).template)}
+            ${tree.data.slice(1).map((d, i) => Card({d}).template)}
+          </g>
+        </g>
+      </svg>
+    `),
+    mounted
+  }
+
+  function calculateTreeFit(svg_dim) {
+    return {k:1, x:svg_dim.width/2, y: svg_dim.height/2}
+  }
+
+  function Card({d, is_main}) {
+    const [w, h] = is_main ? [160, 60] : [160, 40],
+      pos = {x: d.x, y: d.y};
+
+    return {template: (`
+      <g transform="translate(${pos.x}, ${pos.y})" class="card" data-rel_type="${d.data.rel_type}" style="cursor: pointer">
+        <g transform="translate(${-w / 2}, ${-h / 2})">
+          ${CardBody({d,w,h}).template}
+        </g>
+      </g>
+    `)
+    }
+
+    function CardBody({d,w,h}) {
+      const color_class = d.data.data.gender === 'M' ? 'card-male' : d.data.data.gender === 'F' ? 'card-female' : 'card-genderless';
+      return {template: (`
+        <g>
+          <rect width="${w}" height="${h}" fill="#fff" rx="${10}" ${d.data.main ? 'stroke="#000"' : ''} class="${color_class}" />
+          <text transform="translate(${0}, ${h / 4})">
+            <tspan x="${10}" dy="${14}">${d.data.data.fn} ${d.data.data.ln || ''}</tspan>
+            <tspan x="${10}" dy="${14}">${d.data.data.bd || ''}</tspan>
+          </text>
+        </g>
+      `)
+      }
+    }
+  }
+
+  function Link({d, is_vertical}) {
+    return {template: (`
+      <path d="${createPath()}" fill="none" stroke="#fff" />
+    `)}
+
+    function createPath() {
+      const {w,h} = store.state.card_dim;
+      let parent = (is_vertical && d.y < 0)
+        ? {x: 0, y: -h/2}
+        : (is_vertical && d.y > 0)
+        ? {x: 0, y: h/2}
+        : (!is_vertical && d.x < 0)
+        ? {x: -w/2, y: 0}
+        : (!is_vertical && d.x > 0)
+        ? {x: w/2, y: 0}
+        : {x: 0, y: 0};
+
+
+      if (is_vertical) {
+        return (
+          "M" + d.x + "," + d.y
+          + "C" + (d.x) + "," + (d.y + (d.y < 0 ? 50 : -50))
+          + " " + (parent.x) + "," + (parent.y + (d.y < 0 ? -50 : 50))
+          + " " + parent.x + "," + parent.y
+        )
+      } else {
+        const s = d.x > 0 ? +1 : -1;
+        return (
+          "M" + d.x + "," + d.y
+          + "C" + (parent.x + 50*s) + "," + d.y
+          + " " + (parent.x + 150*s) + "," + parent.y
+          + " " + parent.x + "," + parent.y
+        )
+      }
+    }
+  }
+
+  function addEventListeners(view) {
+    view.addEventListener("click", e => {
+      const node = e.target;
+      handleCardClick(node) || view.remove();
+    });
+
+    function handleCardClick(node) {
+      if (!node.closest('.card')) return
+      const card = node.closest('.card'),
+        rel_type = card.getAttribute("data-rel_type"),
+        rel_datum = datum,
+        {new_rel, addNewRel} = NewRelative({data_stash, rel_type, rel_datum}),
+        postSubmit = () => {
+          view.remove();
+          addNewRel();
+          store.update.tree();
+        };
+      store.state.cardEditForm({datum: new_rel, rel_datum, rel_type, postSubmit, store});
+      return true
+    }
+  }
+
+}
+
+function AddRelativeTree(store, d_id, transition_time) {
+  const datum = store.getData().find(d => d.id === d_id),
+    tree = CalculateTree$1({datum, data_stash: store.getData(), card_dim: store.state.card_dim}),
+    view = View(store, tree, datum);
+
+  const div_add_relative = document.createElement("div");
+  div_add_relative.style.cssText = "width: 100%; height: 100%; position: absolute; top: 0; left: 0;background-color: rgba(0,0,0,.3);opacity: 0";
+  div_add_relative.innerHTML = view.template;
+
+  store.state.cont.appendChild(div_add_relative);
+  view.mounted(div_add_relative);
+  d3.select(div_add_relative).transition().duration(transition_time).delay(transition_time/4).style("opacity", 1);
+}
+
+function cardChangeMain(store, {card, d}) {
+  toggleAllRels(store.getTree().data, false);
+  store.update.mainId(d.data.id);
+  store.update.tree({tree_position: 'inherit'});
+  return true
+}
+
+function cardEdit(store, {card, d}) {
+  const datum = d.data,
+    postSubmit = (props) => {
+      if (datum.to_add) moveToAddToAdded(datum, store.getData());
+      if (props && props.delete) {
+        if (datum.main) store.update.mainId(null);
+        deletePerson(datum, store.getData());
+      }
+      store.update.tree();
+    };
+  store.state.cardEditForm({datum, postSubmit, store});
+}
+
+function cardAddRelative(store, {card, d}) {
+  const transition_time = 1000;
+
+  toggleAllRels(store.getTree().data, false);
+  store.update.mainId(d.data.id);
+  store.update.tree({tree_position: 'main_to_middle', transition_time});
+  AddRelativeTree(store, d.data.id, transition_time);
+}
+
+function cardShowHideRels(store, {card, d}) {
+  d.data.hide_rels = !d.data.hide_rels;
+  toggleRels(d, d.data.hide_rels);
+  store.update.tree({tree_position: 'inherit'});
+}
+
+var handlers = /*#__PURE__*/Object.freeze({
+__proto__: null,
+moveToAddToAdded: moveToAddToAdded,
+removeToAdd: removeToAdd,
+deletePerson: deletePerson,
+manualZoom: manualZoom,
+isAllRelativeDisplayed: isAllRelativeDisplayed,
+generateUUID: generateUUID,
+cardChangeMain: cardChangeMain,
+cardEdit: cardEdit,
+cardAddRelative: cardAddRelative,
+cardShowHideRels: cardShowHideRels,
+NewRelative: NewRelative,
+checkIfRelativesConnectedWithoutPerson: checkIfRelativesConnectedWithoutPerson
+});
+
 function d3AnimationView(store) {
   const svg = createSvg();
   setupSvg(svg, store.state.zoom_polite);
@@ -1208,7 +1212,7 @@ function createStore(initial_state) {
 
 
   function calcTree() {
-    return CalculateTree$1({
+    return CalculateTree({
       data_stash: state.data, main_id: state.main_id,
       node_separation: state.node_separation, level_separation: state.level_separation
     })
@@ -1230,7 +1234,7 @@ CardImage: CardImage
 });
 
 var index = {
-  CalculateTree: CalculateTree$1,
+  CalculateTree,
   createStore,
   d3AnimationView,
   handlers,
@@ -1240,5 +1244,3 @@ var index = {
 return index;
 
 })));
-
-window.denis = "tenis"
