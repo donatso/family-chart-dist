@@ -822,7 +822,7 @@ function handleRelsOfNewDatum({datum, data_stash, rel_type, rel_datum}) {
   }
 }
 
-function NewRelative({data_stash, rel_type, rel_datum}) {
+function newRelative({data_stash, rel_type, rel_datum}) {
   const datum = createNewRel(rel_datum, rel_type);
   return {new_rel: datum, addNewRel}
 
@@ -943,7 +943,7 @@ function View(store, tree, datum) {
       const card = node.closest('.card'),
         rel_type = card.getAttribute("data-rel_type"),
         rel_datum = datum,
-        {new_rel, addNewRel} = NewRelative({data_stash, rel_type, rel_datum}),
+        {new_rel, addNewRel} = newRelative({data_stash, rel_type, rel_datum}),
         postSubmit = () => {
           view.remove();
           addNewRel();
@@ -1017,7 +1017,8 @@ cardChangeMain: cardChangeMain,
 cardEdit: cardEdit,
 cardAddRelative: cardAddRelative,
 cardShowHideRels: cardShowHideRels,
-NewRelative: NewRelative,
+handleRelsOfNewDatum: handleRelsOfNewDatum,
+newRelative: newRelative,
 checkIfRelativesConnectedWithoutPerson: checkIfRelativesConnectedWithoutPerson
 });
 
