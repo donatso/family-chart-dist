@@ -775,8 +775,10 @@ function handleRelsOfNewDatum({datum, data_stash, rel_type, rel_datum}) {
       spouse.rels.children.push(datum.id);
 
       function addOtherParent() {
-        const new_spouse = createNewRel("spouse");
+        const new_spouse = createNewPersonWithGenderFromRel({rel_type: "spouse", rel_datum});
         addSpouse(new_spouse);
+        addNewPerson({data_stash, datum: new_spouse});
+        console.log(data_stash);
         return new_spouse
       }
     }
@@ -822,22 +824,29 @@ function handleRelsOfNewDatum({datum, data_stash, rel_type, rel_datum}) {
   }
 }
 
-function newRelative({data_stash, rel_type, rel_datum}) {
-  const datum = createNewRel(rel_datum, rel_type);
-  return {new_rel: datum, addNewRel}
+function createNewPerson({data}) {
+  return {id: generateUUID(), data: data || {}, rels: {}}
+}
 
-  function createNewRel(rel_datum, rel_type) {
-    return {id: generateUUID(), data: {gender: getGender(rel_datum, rel_type)}, rels: {}}
-  }
+function createNewPersonWithGenderFromRel({data, rel_type, rel_datum}) {
+  const gender = getGenderFromRelative(rel_datum, rel_type);
+  data = Object.assign(data || {}, {gender});
+  return createNewPerson({data})
 
-  function addNewRel() {
-    data_stash.push(datum);
-    return handleRelsOfNewDatum({datum, data_stash, rel_type, rel_datum})
-  }
-
-  function getGender(rel_datum, rel_type) {
+  function getGenderFromRelative(rel_datum, rel_type) {
     return (["daughter", "mother"].includes(rel_type) || rel_type === "spouse" && rel_datum.data.gender === "M") ? "F" : "M"
   }
+}
+
+
+function newRelative({data_stash, rel_type, rel_datum}) {
+  const rel_data = {gender: getGenderFromRelative(rel_datum, rel_type)},
+    datum = createNewPerson({data: rel_data});
+  return {new_rel: datum, addNewRel}
+}
+
+function addNewPerson({data_stash, datum}) {
+  data_stash.push(datum);
 }
 
 function View(store, tree, datum) {
@@ -943,13 +952,14 @@ function View(store, tree, datum) {
       const card = node.closest('.card'),
         rel_type = card.getAttribute("data-rel_type"),
         rel_datum = datum,
-        {new_rel, addNewRel} = newRelative({data_stash, rel_type, rel_datum}),
+        new_datum = createNewPersonWithGenderFromRel({rel_datum, rel_type}),
         postSubmit = () => {
           view.remove();
-          addNewRel();
+          addNewPerson({data_stash, datum: new_datum});
+          handleRelsOfNewDatum({datum: new_datum, data_stash, rel_datum, rel_type});
           store.update.tree();
         };
-      store.state.cardEditForm({datum: new_rel, rel_datum, rel_type, postSubmit, store});
+      store.state.cardEditForm({datum: new_datum, rel_datum, rel_type, postSubmit, store});
       return true
     }
   }
@@ -1018,7 +1028,10 @@ cardEdit: cardEdit,
 cardAddRelative: cardAddRelative,
 cardShowHideRels: cardShowHideRels,
 handleRelsOfNewDatum: handleRelsOfNewDatum,
+createNewPerson: createNewPerson,
+createNewPersonWithGenderFromRel: createNewPersonWithGenderFromRel,
 newRelative: newRelative,
+addNewPerson: addNewPerson,
 checkIfRelativesConnectedWithoutPerson: checkIfRelativesConnectedWithoutPerson
 });
 
