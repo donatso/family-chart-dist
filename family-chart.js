@@ -516,8 +516,9 @@ function calculateTreeFit(svg_dim, tree_dim) {
   return {k,x,y}
 }
 
-function mainToMiddle({datum, svg, svg_dim, transition_time}) {
-  const t = {k:1, x:svg_dim.width/2-datum.x, y: svg_dim.height/2-datum.y};
+function mainToMiddle({datum, svg, svg_dim, scale, transition_time}) {
+  const k = scale || 1, x = svg_dim.width/2-datum.x*k, y = svg_dim.height/2-datum.y,
+    t = {k, x: x/k, y: y/k};
   positionTree({t, svg, with_transition: true, transition_time});
 }
 
@@ -854,7 +855,8 @@ function CalculateTree$1({datum, data_stash, card_dim, add_rel_labels}) {
   return {data}
 }
 
-function View(store, tree, datum) {
+function View(store, tree, datum, props) {
+  if (!props) props = {};
   const data_stash = store.getData(),
     svg_dim = store.state.cont.getBoundingClientRect(),
     tree_fit = calculateTreeFit(svg_dim),
@@ -878,7 +880,8 @@ function View(store, tree, datum) {
   }
 
   function calculateTreeFit(svg_dim) {
-    return {k:1, x:svg_dim.width/2, y: svg_dim.height/2}
+    const k = props.scale || 1;
+    return {k, x:svg_dim.width/2, y: svg_dim.height/2}
   }
 
   function Card({d, is_main}) {
@@ -970,10 +973,11 @@ function View(store, tree, datum) {
 
 }
 
-function AddRelativeTree(store, d_id, transition_time) {
+function AddRelativeTree(store, d_id, transition_time, props) {
+  if (!props) props = {};
   const datum = store.getData().find(d => d.id === d_id),
     tree = CalculateTree$1({datum, data_stash: store.getData(), card_dim: store.state.card_dim, add_rel_labels: store.state.add_rel_labels}),
-    view = View(store, tree, datum);
+    view = View(store, tree, datum, props);
 
   const div_add_relative = document.createElement("div");
   div_add_relative.style.cssText = "width: 100%; height: 100%; position: absolute; top: 0; left: 0;background-color: rgba(0,0,0,.3);opacity: 0";
@@ -1004,13 +1008,14 @@ function cardEdit(store, {card, d}) {
   store.state.cardEditForm({datum, postSubmit, store});
 }
 
-function cardAddRelative(store, {card, d}) {
+function cardAddRelative(store, {card, d, scale}) {
   const transition_time = 1000;
 
+  if (!scale && window.innerWidth < 650) scale = window.innerWidth / 650;
   toggleAllRels(store.getTree().data, false);
   store.update.mainId(d.data.id);
-  store.update.tree({tree_position: 'main_to_middle', transition_time});
-  AddRelativeTree(store, d.data.id, transition_time);
+  store.update.tree({tree_position: 'main_to_middle', transition_time, scale});
+  AddRelativeTree(store, d.data.id, transition_time, {scale});
 }
 
 function cardShowHideRels(store, {card, d}) {
@@ -1047,14 +1052,17 @@ function d3AnimationView(store) {
 
   return {update: updateView}
 
-  function updateView({tree_position='fit', transition_time=2000}) {
+  function updateView(props) {
+    if (!props) props = {};
     const tree = store.state.tree,
-      view = d3.select(svg).select(".view");
+      view = d3.select(svg).select(".view"),
+      tree_position = props.tree_position || 'fit',
+      transition_time = props.hasOwnProperty('transition_time') ? props.transition_time : 2000;
 
     updateCards();
     updateLinks();
     if (tree_position === 'fit') treeFit({svg, svg_dim: svg.getBoundingClientRect(), tree_dim: tree.dim, transition_time});
-    else if (tree_position === 'main_to_middle') mainToMiddle({datum: tree.data[0], svg, svg_dim: svg.getBoundingClientRect(), transition_time});
+    else if (tree_position === 'main_to_middle') mainToMiddle({datum: tree.data[0], svg, svg_dim: svg.getBoundingClientRect(), scale: props.scale, transition_time});
     else ;
 
     function updateLinks() {
